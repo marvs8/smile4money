@@ -1,25 +1,27 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import '../styles/claim-burn.css';
+import type { WalletStatus } from '../types';
 
 type Mode = 'claim' | 'burn';
-type Phase = 'idle' | 'confirm' | 'pending' | 'success' | 'error';
+type Status = 'idle' | 'confirm' | 'pending' | 'success' | 'error';
 
-type WalletStateProp =
-  | string
-  | { status: string; balance?: string | null; address?: string | null };
+interface TxRecord {
+  mode: Mode;
+  amount: string;
+  hash: string | null;
+  timestamp: number;
+}
 
 interface ClaimBurnProps {
   walletState: WalletStateProp;
   onConnect?: () => void;
-  onDisconnect?: () => void;
-  onRefreshBalance?: () => void;
   onClaim?: (amount: string) => Promise<string | void>;
   onBurn?: (amount: string) => Promise<string | void>;
   onSwitchNetwork?: () => void;
   publicKey?: string | null;
   balance?: string | null;
   expectedNetwork?: string;
-  className?: string;
+  tokenSymbol?: string;
 }
 
 function isValidAmount(value: string): boolean {
@@ -35,19 +37,19 @@ function stripTrailingZeros(value: string): string {
 export function ClaimBurn({
   walletState,
   onConnect,
-  onDisconnect,
-  onRefreshBalance,
   onClaim,
   onBurn,
   onSwitchNetwork,
+  onDisconnect,
+  onRefreshBalance,
   publicKey,
-  balance: balanceProp,
+  balance,
   expectedNetwork = 'testnet',
-  className = '',
+  tokenSymbol = 'XLM',
 }: ClaimBurnProps) {
   const [mode, setMode] = useState<Mode>('claim');
   const [amount, setAmount] = useState('');
-  const [phase, setPhase] = useState<Phase>('idle');
+  const [status, setStatus] = useState<Status>('idle');
   const [errorMsg, setErrorMsg] = useState('');
   const [txHash, setTxHash] = useState<string | null>(null);
 
@@ -70,21 +72,20 @@ export function ClaimBurn({
     [walletBalance],
   );
 
-  const exceedsBalance = useMemo(
-    () =>
-      mode === 'burn' &&
-      balanceNum !== null &&
-      isValidAmount(amount) &&
-      Number(amount) > balanceNum,
-    [amount, balanceNum, mode],
-  );
+  // Auto-dismiss success after 3s
+  useEffect(() => {
+    if (status === 'success') {
+      const t = setTimeout(() => setStatus('idle'), 3000);
+      return () => clearTimeout(t);
+    }
+  }, [status]);
 
   const valid = isValidAmount(amount) && !exceedsBalance;
   const isPending = phase === 'pending';
   const showConfirmation = phase === 'confirm';
 
   function resetFeedback() {
-    setPhase('idle');
+    setStatus('idle');
     setTxHash(null);
     setErrorMsg('');
   }
@@ -121,12 +122,12 @@ export function ClaimBurn({
 
   function handleRequestSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    if (!valid) return;
-    setPhase('confirm');
+    if (!isValidAmount(amount)) return;
+    setStatus('confirm');
   }
 
-  async function handleConfirm() {
-    setPhase('pending');
+  const handleConfirm = useCallback(async () => {
+    setStatus('pending');
     setErrorMsg('');
     setTxHash(null);
 
@@ -134,16 +135,17 @@ export function ClaimBurn({
       const action = mode === 'claim' ? onClaim : onBurn;
       const hash = await action?.(amount);
       if (hash) setTxHash(hash);
-      setPhase('success');
+      setStatus('success');
       setAmount('');
     } catch (err) {
-      setPhase('error');
+      setStatus('error');
       setErrorMsg(err instanceof Error ? err.message : 'Transaction failed');
     }
-  }
+  }, [mode, onClaim, onBurn, amount]);
 
   function handleCancel() {
-    setPhase('idle');
+    setStatus('idle');
+    setTimeout(() => amountInputRef.current?.focus(), 0);
   }
 
   if (stateKey === 'checking') {
@@ -183,7 +185,7 @@ export function ClaimBurn({
   if (stateKey === 'disconnected') {
     return (
       <div className="wallet-state" data-testid="wallet-disconnected">
-        <div className="wallet-state-icon">💼</div>
+        <span className="wallet-state-icon">💼</span>
         <h3 className="wallet-state-title">Connect Your Wallet</h3>
         <p className="wallet-state-message">
           Connect your Freighter wallet to claim rewards or burn tokens.
@@ -203,10 +205,11 @@ export function ClaimBurn({
   if (stateKey === 'wrongNetwork') {
     return (
       <div className="wallet-state" data-testid="wallet-wrong-network">
-        <div className="wallet-state-icon">🌐</div>
+        <span className="wallet-state-icon">🌐</span>
         <h3 className="wallet-state-title">Wrong Network</h3>
         <p className="wallet-state-message">
-          Please switch your Freighter wallet to <strong>{expectedNetwork}</strong>.
+          Please switch your Freighter wallet to{' '}
+          <strong>{expectedNetwork}</strong>.
         </p>
         <button
           type="button"
@@ -220,13 +223,13 @@ export function ClaimBurn({
     );
   }
 
-  if (stateKey === 'error') {
+  if (walletState === 'error') {
     return (
       <div className="wallet-state" data-testid="wallet-error">
-        <div className="wallet-state-icon">⚠️</div>
+        <span className="wallet-state-icon">⚠️</span>
         <h3 className="wallet-state-title">Connection Error</h3>
         <p className="wallet-state-message">
-          {errorMsg || 'An error occurred while connecting to your wallet.'}
+          An error occurred while connecting to your wallet.
         </p>
         <button
           type="button"
@@ -360,6 +363,7 @@ export function ClaimBurn({
             className={`btn btn-${mode}`}
             disabled={isPending || !valid}
             data-testid="submit-btn"
+            aria-busy={isPending}
           >
             {mode === 'claim' ? 'Claim' : 'Burn'}
           </button>
@@ -391,3 +395,5 @@ export function ClaimBurn({
     </div>
   );
 }
+
+export default ClaimBurn;

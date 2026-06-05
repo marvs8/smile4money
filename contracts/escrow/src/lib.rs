@@ -26,8 +26,22 @@ impl EscrowContract {
     }
 
     /// Initialize the contract with a trusted oracle address, an admin, and a default token.
-    /// Returns `Error::InvalidToken` if the token address is not a valid token contract.
-    pub fn initialize(env: Env, oracle: Address, admin: Address, token: Address) -> Result<(), Error> {
+    ///
+    /// # Panics
+    ///
+    /// Panics with `"Contract already initialized"` if called more than once.
+    /// This guard prevents an attacker from overwriting the oracle or admin
+    /// addresses after deployment (see Issue #1 / #110).
+    ///
+    /// # Errors
+    ///
+    /// Returns `Error::InvalidToken` if `token` is not a valid SEP-41 token contract.
+    pub fn initialize(
+        env: Env,
+        oracle: Address,
+        admin: Address,
+        token: Address,
+    ) -> Result<(), Error> {
         if env.storage().instance().has(&DataKey::Oracle) {
             panic!("Contract already initialized");
         }
